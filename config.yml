@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: default
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval:     1m
+      evaluation_interval: 1m
+      # scrape_timeout is set to the global default (10s).
+
+    scrape_configs:
+    #  - {job_name: 'prometheus',   static_configs: [{targets: ['localhost:9090']}]}
+    #  - {job_name: 'openid-proxy', static_configs: [{targets: ['openid-proxy.default.svc.cluster.local:8000']}]}
+    #  - {job_name: 'nginx-log',    static_configs: [{targets: ['nginx.svc.cluster.local:8000']}]}
+    #  - {job_name: 'grafana',      static_configs: [{targets: ['grafana.default.svc.cluster.local']}]}
+    #  - {job_name: 'kube-state',   static_configs: [{targets: ['kube-state-metrics.default.svc.cluster.local:8080']}]}
+
+      # should be able to annotate the services that support scraping, so we don't waste so much on errors
+      - job_name: 'k8services'
+        kubernetes_sd_configs: [{role: endpoints}]
+        relabel_configs:
+        # - source_labels:
+        #     - __meta_kubernetes_namespace
+        #     - __meta_kubernetes_service_name
+        #   action: drop
+        #   regex: default;kubernetes
+          - source_labels:
+              - __meta_kubernetes_namespace
+            regex: default
+            action: keep
+          - source_labels: [__meta_kubernetes_service_name]
+            target_label: job
+
+
+      # seems like this would match more stuff, but all I get is coredns
+      - job_name: 'coredns' 
+        kubernetes_sd_configs: [{role: pod}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: job
+
+      - job_name: 'cadvisor'
+        kubernetes_sd_configs: [{role: node}]
+        scheme: https
+        tls_config: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        metrics_path: /metrics/cadvisor
+        
+      - job_name: 'kubelets'
+        
+        scheme: https
+        tls_config: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+        kubernetes_sd_configs: [{role: node}]
+        
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics
+           
+
+      - job_name: 'prober'
+        scrape_interval: 5m
+        metrics_path: /probe
+        params:
+          module: [https]
+        static_configs:
+          - targets:
+            # sync with /my/doc/ssl/letsencrypt/run.py
+            - bigast.com
+            - www.bigast.com
+            - bigasterisk.com
+            - www.bigasterisk.com
+
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: prober.default.svc.cluster.local
+            
+    alerting:
+      alertmanagers:
+        - static_configs:
+          - targets:
+             - alertmanager.default.svc.cluster.local
+
+    # Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+    rule_files:
+      - "rules.yml"
