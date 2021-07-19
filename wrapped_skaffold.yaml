@@ -1,0 +1,4 @@
+apiVersion: skaffold/v2beta5
+kind: Config
+metadata: {name: prometheus}
+deploy: {kubectl: {manifests: ["deploy.yml", "alertmanager.yml", "kube-state-metrics.yml"]}}
