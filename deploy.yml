@@ -98,7 +98,7 @@ spec:
       serviceAccountName: prometheus
       containers:
         - name: prometheus
-          image: prom/prometheus:v2.26.0
+          image: prom/prometheus:v2.28.1
           command: ["/bin/prometheus"]
           args:
             - --web.external-url=https://bigasterisk.com/prometheus/
