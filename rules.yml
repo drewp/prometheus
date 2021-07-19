@@ -1,0 +1,93 @@
+# docs: https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+# "Whenever the alert expression results in one or more vector
+# elements at a given point in time, the alert counts as active for
+# these elements' label sets."
+
+# also https://www.metricfire.com/blog/top-5-prometheus-alertmanager-gotchas/#Missing-metrics
+
+groups:
+  - name: webcam
+    rules:
+      - alert: twinscam_pipeline_stopped
+        expr: sum without (instance) (cam_pipeline_state{cam_pipeline_state="playing"}) < 1 or absent(cam_pipeline_state{cam_pipeline_state="playing"})
+        for: 10m
+        labels:
+          severity: losingData
+        annotations:
+          summary: "twinscam recorder pipeline not running. See https://bigasterisk.com/k/clusters/local/namespaces/default/deployments/webcam-record/logs"
+      - alert: twinscam_not_advancing
+        expr: rate(cam_stream_bytes{element="splitmux"}[3m]) < 0.2
+        for: 10m
+        labels:
+          severity: losingData
+        annotations:
+          summary: "twinscam output bytes is advancing too slowly. See https://bigasterisk.com/k/clusters/local/namespaces/default/deployments/webcam-record/logs"
+      - alert: twinscam_indexer_stalled
+        expr: rate(webcam_indexer_update_count{job="webcam-indexer"}[2m]) < .1 or absent_over_time(webcam_indexer_update_count{job="webcam-indexer"}[5m])
+        for: 10m
+        labels:
+          severity: webcamUsersAffected
+        annotations:
+          summary: "twinscam indexer update loop is stalled"
+
+  - name: Outages
+    rules:
+      - alert: powereagleStalled
+        expr: rate(house_power_w[100m]) == 0
+        for: 0m
+        labels:
+          severity: losingData
+        annotations:
+          summary: "power eagle data stalled"
+          description: "logs at https://bigasterisk.com/k/clusters/local/namespaces/default/deployments/power-eagle/logs"
+
+      - alert: powereagleAbsent
+        expr: absent_over_time(house_power_w[5m])
+        for: 2m
+        labels:
+          severity: losingData
+        annotations:
+          summary: "power eagle data missing"
+          description: "logs at https://bigasterisk.com/k/clusters/local/namespaces/default/deployments/power-eagle/logs"
+
+      - alert: wifi_scrape_errors
+        expr: rate(poll_errors_total{job="wifi"}[2m]) > .1
+        labels:
+          severity: houseUsersAffected
+        annotations:
+          summary: "errors getting wifi users list"
+
+      - alert: absent_mitmproxy
+        expr: absent(process_resident_memory_bytes{job="mitmproxy"})
+        labels:
+          severity: houseUsersAffected
+        annotations:
+          summary: "mitmproxy metrics not responding. See https://bigasterisk.com/grafana/d/ix3hMAdMk/webfilter?orgId=1&from=now-12h&to=now and https://bigasterisk.com/k/clusters/local/namespaces/default/deployments/mitmproxy (metrics actually come from webfilter.py plugin)"
+
+      - alert: net_routes_sync
+        expr: min(sync_is_up{job="net-routes"}) != 1
+        for: 30m
+        labels:
+          severity: houseUsersAffected
+        annotations:
+          summary: "mitmproxy not syncing. See https://bigasterisk.com/grafana/d/ix3hMAdMk/webfilter?orgId=1&from=now-12h&to=now and https://bigasterisk.com/k/clusters/local/namespaces/default/deployments/net-routes"
+
+      - alert: ping_bang5_to_dash5
+        expr: 'ping_percent_packet_loss{host="dash"} > 10 or absent_over_time(ping_percent_packet_loss{host="dash"}[5m])'
+        for: 5m
+
+      - alert: ping_bang5_to_frontbed5
+        expr: 'ping_percent_packet_loss{host="frontbed"} > 10 or absent_over_time(ping_percent_packet_loss{host="frontbed"}[5m])'
+        for: 5m
+      
+      # sync to netdevices.n3
+
+  - name: alerts
+    rules:
+      - { alert: housePower, expr: "house_power_w > 3000", for: 20m, labels: { severity: waste }, annotations: { summary: "house power usage over 3KW" } }
+      - alert: ssl_certs_expiring_soon
+        expr: min((min_over_time(probe_ssl_earliest_cert_expiry[1d])-time())/86400) < 10
+        labels:
+          severity: futureUsersAffected
+        annotations:
+          summary: "cert expiring soon. See https://bigasterisk.com/grafana/d/z1YtDa3Gz/certs?orgId=1"

@@ -1,0 +1,153 @@
+global:
+  scrape_interval:     1m
+  evaluation_interval: 1m
+  # scrape_timeout is set to the global default (10s).
+
+scrape_configs:
+
+  # should be able to annotate the services that support scraping, so we don't waste so much on errors
+  - job_name: 'k8services'
+    kubernetes_sd_configs: [{role: endpoints}]
+    relabel_configs:
+    # - source_labels:
+    #     - __meta_kubernetes_namespace
+    #     - __meta_kubernetes_service_name
+    #   action: drop
+    #   regex: default;kubernetes
+      - source_labels:
+          - __meta_kubernetes_namespace
+        regex: default
+        action: keep
+      - source_labels: [__meta_kubernetes_service_name]
+        target_label: job
+
+  # seems like this would match more stuff, but all I get is coredns
+  - job_name: 'coredns' 
+    kubernetes_sd_configs: [{role: pod}]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: job
+
+  #- job_name: 'cadvisor'
+    # this ssl is not working:
+    #
+    # kubernetes_sd_configs: [{role: node}]
+    # scheme: https
+    # tls_config: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+    # bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    # metrics_path: /metrics/cadvisor
+
+    # workaround, probably insecure, for the block above. 10.43.0.1 might be aka 'kubernetes.default.svc'
+  - job_name: 'cadvisor_bang'
+    metrics_path: /api/v1/nodes/bang/proxy/metrics/cadvisor
+    tls_config: { cert_file: /tls_secrets/client-admin.crt, key_file: /tls_secrets/client-admin.key, insecure_skip_verify: true }
+    scheme: https
+    static_configs: [{targets: [10.43.0.1]}]
+    relabel_configs:
+      - { source_labels: ["job"], target_label: "job", replacement: "cadvisor" }
+      - { source_labels: ["instance"], target_label: "instance", replacement: "bang" }
+  - job_name: 'cadvisor_dash'
+    metrics_path: /api/v1/nodes/dash/proxy/metrics/cadvisor
+    tls_config: { cert_file: /tls_secrets/client-admin.crt, key_file: /tls_secrets/client-admin.key, insecure_skip_verify: true }
+    scheme: https
+    static_configs: [{targets: [10.43.0.1]}]
+    relabel_configs:
+      - { source_labels: ["job"], target_label: "job", replacement: "cadvisor" }
+      - { source_labels: ["instance"], target_label: "instance", replacement: "dash" }
+  
+  - job_name: 'cadvisor_frontbed'
+    metrics_path: /api/v1/nodes/frontbed/proxy/metrics/cadvisor
+    tls_config: { cert_file: /tls_secrets/client-admin.crt, key_file: /tls_secrets/client-admin.key, insecure_skip_verify: true }
+    scheme: https
+    static_configs: [{targets: [10.43.0.1]}]
+    relabel_configs:
+      - { source_labels: ["job"], target_label: "job", replacement: "cadvisor" }
+      - { source_labels: ["instance"], target_label: "instance", replacement: "frontbed" }
+
+  - job_name: 'cadvisor_slash'
+    metrics_path: /api/v1/nodes/slash/proxy/metrics/cadvisor
+    tls_config: { cert_file: /tls_secrets/client-admin.crt, key_file: /tls_secrets/client-admin.key, insecure_skip_verify: true }
+    scheme: https
+    static_configs: [{targets: [10.43.0.1]}]
+    relabel_configs:
+      - { source_labels: ["job"], target_label: "job", replacement: "cadvisor" }
+      - { source_labels: ["instance"], target_label: "instance", replacement: "slash" }
+
+  - job_name: 'telegraf'
+    scheme: http
+    static_configs: [{targets: ['bang5:9273', 'dash5:9273', 'slash5:9273', 'frontbed5:9273']}]
+      
+  - job_name: 'kubelets'
+    
+    scheme: https
+    tls_config: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+    kubernetes_sd_configs: [{role: node}]
+    
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics
+        
+
+  - job_name: 'ntop'
+    metrics_path: /lua/local/lanscape/main.lua
+    static_configs:
+      - targets:
+        - 10.5.0.1:3000
+
+  - job_name: 'ping'
+    scrape_interval: 1h
+    metrics_path: /probe
+    params:
+      module: [icmp]
+    static_configs:
+      - targets:
+        # printer, since it falls out of ntop with no traffic at all. Or, we could poll ink status at http://10.2.0.37/general/status.html?pageid=1
+        - 10.2.0.37
+        # garage, until it's on k3s which will make lots of traffic
+        - 10.5.0.14
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: prober.default.svc.cluster.local
+
+  - job_name: 'prober'
+    scrape_interval: 1d
+    metrics_path: /probe
+    params:
+      module: [https]
+    static_configs:
+      - targets:
+        # sync with /my/doc/ssl/letsencrypt/run.py
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: prober.default.svc.cluster.local
+        
+alerting:
+  alertmanagers:
+    - static_configs:
+      - targets:
+          - alertmanager.default.svc.cluster.local
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - "rules.yml"
