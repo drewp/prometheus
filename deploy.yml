@@ -34,10 +34,14 @@ spec:
           ports:
           - containerPort: 9090
           volumeMounts:
-          - name: opt-prometheus
-            mountPath: /prometheus
-          - name: config
-            mountPath: /config
+          - {name: opt-prometheus, mountPath: /prometheus }
+          - {name: config, mountPath: /config }
+          resources:
+            requests: 
+              cpu: "0.1"
+            limits:
+              cpu: "2"
+              memory: 1Gi
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
